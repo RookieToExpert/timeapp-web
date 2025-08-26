@@ -1,0 +1,36 @@
+server {
+    listen 80;
+    server_name _;
+
+    # 前端静态资源路径（按你的镜像内路径）
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # SPA 路由回退
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # 反代 /api 到后端 Service: api:8080
+    location /api/ {
+        proxy_http_version 1.1;
+
+        # 传递常见头
+        proxy_set_header Host              $host;           # 一般保留前端域名
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 超时与缓冲（按需调整）
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    60s;
+        proxy_read_timeout    60s;
+
+        # 如果后端 API 本身路由前缀不是 /api，需要去掉前缀，放开下面两行：
+        rewrite ^/api/?(.*)$ /$1 break;
+        proxy_pass http://api:8080;
+
+        # 如果后端接受 /api 前缀（大多数 FastAPI/Express 均可），用这一行即可：
+        # proxy_pass http://api:8080;
+    }
+}
