@@ -17,7 +17,7 @@
 </head>
 <body>
 <header>
-  <h2>World Time（登录后查看）</h2>
+  <h2>World Time</h2>
   <div id="notice" class="muted"></div>
 </header>
 
@@ -28,7 +28,6 @@
       <div><input id="email" type="email" placeholder="Email" required style="width:100%"></div><br/>
       <div><input id="password" type="password" placeholder="Password" required style="width:100%"></div><br/>
       <button type="submit">登录</button>
-      <span class="muted">（当前使用后端 Mock，先搭界面）</span>
     </form>
   </section>
 
@@ -119,7 +118,7 @@ document.getElementById('login-form').addEventListener('submit', async (e)=>{
     await loadTimes();
     await loadCounter();
   }else{
-    alert('登录失败（当前为 Mock，返回 200 即可）。');
+    alert('登录失败（让唐睿给你加账号）');
   }
 });
 
