@@ -1,25 +1,18 @@
-# ========= RookieToExpert · timeapp（web + api）=========
-# 同时监听两个 GitHub 仓库，构建并部署到 k8s: timeapp
-# 版本策略：<major>.<counter> —— 运行前选择/输入 major（如 1），
-#          每次运行 counter 自动 +1，得到 1.1、1.2、1.3 …
-
+# ===== timeapp（web + api）多仓库构建 + 部署 =====
 parameters:
 - name: major
   displayName: "Major version (e.g., 1 -> 1.1, 1.2, ...)"
   type: string
   default: '1'
 
-trigger: none   # 由 resources.repositories 触发
+# self 仓库（timeapp-web）用根级触发
+trigger:
+  branches:
+    include: [ main ]
 
+# 另一仓库（timeapp-api）作为资源并开启触发
 resources:
   repositories:
-  - repository: webRepo
-    type: github
-    name: RookieToExpert/timeapp-web
-    endpoint: RookieToExpert
-    ref: refs/heads/main
-    trigger:
-      branches: { include: [ main ] }
   - repository: apiRepo
     type: github
     name: RookieToExpert/timeapp-api
@@ -28,40 +21,52 @@ resources:
     trigger:
       branches: { include: [ main ] }
 
+# —— 关键修正：先把参数变成变量，再用 counter() ——
 variables:
-  # Service connections
-  dockerHubSC: 'toDockerHub'
-  k8sSC: 'k8s-sc'
+- name: dockerHubSC
+  value: toDockerHub
+- name: k8sSC
+  value: k8s-sc
 
-  # Docker Hub repos（不带 docker.io）
-  repoWeb: 'rayrayye/timeapp-web'
-  repoApi: 'rayrayye/timeapp-api-new'
+- name: repoWeb
+  value: rayrayye/timeapp-web
+- name: repoApi
+  value: rayrayye/timeapp-api-new
 
-  # K8s
-  ns: 'timeapp'
-  deployWeb: 'web'
-  deployApi: 'web-api'
-  containerWeb: 'web'
-  containerApi: 'api'              # <- 你的 web-api 部署里的容器名
+- name: ns
+  value: timeapp
+- name: deployWeb
+  value: web
+- name: deployApi
+  value: web-api
+- name: containerWeb
+  value: web
+- name: containerApi
+  value: api
 
-  # 自动递增的补丁号；以 major 作为计数键，切到 2 时会从 1 重新开始
-  patch: $[ counter(parameters.major, 1) ]
+# 用参数生成一个普通变量（编译期替换）
+- name: majorVar
+  value: ${{ parameters.major }}
+
+# 用 counter() 基于 majorVar 计数（运行期计算）
+- name: patch
+  value: $[ counter(variables['majorVar'], 1) ]
 
 stages:
-# ===== CI：构建并推送 =====
+# ===== CI =====
 - stage: BuildPush
   displayName: Build & Push images
   jobs:
   - job: Build
     pool: { vmImage: 'ubuntu-latest' }
     steps:
-    - checkout: webRepo
+    - checkout: self
       path: s/web
     - checkout: apiRepo
       path: s/api
 
-    - script: |
-        echo "Using version: ${{ parameters.major }}.$(patch)"
+    - bash: |
+        echo "Using version: $(majorVar).$(patch)"
       displayName: Show version
 
     - task: Docker@2
@@ -70,19 +75,18 @@ stages:
         command: login
         containerRegistry: '$(dockerHubSC)'
 
-    # web 镜像
     - task: Docker@2
       displayName: Build+Push web
       inputs:
         command: buildAndPush
         repository: '$(repoWeb)'
-        # 注意：你的仓库里是小写 dockerfile；如果改成标准 "Dockerfile"，这里也改
+        # 注意：你的 web 仓库是小写 dockerfile；如改回 Dockerfile，请同步改这里
         Dockerfile: '$(Pipeline.Workspace)/s/web/dockerfile'
         buildContext: '$(Pipeline.Workspace)/s/web'
         tags: |
-          ${{ parameters.major }}.$(patch)
+          $(majorVar).$(patch)
+          latest
 
-    # api 镜像
     - task: Docker@2
       displayName: Build+Push api
       inputs:
@@ -91,10 +95,10 @@ stages:
         Dockerfile: '$(Pipeline.Workspace)/s/api/dockerfile'
         buildContext: '$(Pipeline.Workspace)/s/api'
         tags: |
-          ${{ parameters.major }}.$(patch)
-          latest   # 如不想要 latest，把这一行删掉
+          $(majorVar).$(patch)
+          latest
 
-# ===== CD：滚动更新到 k8s/timeapp =====
+# ===== CD =====
 - stage: Deploy
   displayName: Deploy to timeapp
   dependsOn: BuildPush
@@ -111,7 +115,7 @@ stages:
         command: 'set'
         arguments: >
           image deployment/$(deployWeb)
-          $(containerWeb)=docker.io/$(repoWeb):${{ parameters.major }}.$(patch)
+          $(containerWeb)=docker.io/$(repoWeb):$(majorVar).$(patch)
 
     - task: Kubernetes@1
       displayName: Set image (web-api)
@@ -122,7 +126,7 @@ stages:
         command: 'set'
         arguments: >
           image deployment/$(deployApi)
-          $(containerApi)=docker.io/$(repoApi):${{ parameters.major }}.$(patch)
+          $(containerApi)=docker.io/$(repoApi):$(majorVar).$(patch)
 
     - task: Kubernetes@1
       displayName: Wait rollout (web)
