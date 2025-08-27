@@ -80,23 +80,20 @@ stages:
       inputs:
         command: buildAndPush
         repository: '$(repoWeb)'
-        # 注意：你的 web 仓库是小写 dockerfile；如改回 Dockerfile，请同步改这里
-        Dockerfile: '$(Pipeline.Workspace)/s/web/dockerfile'
+        Dockerfile: '$(Pipeline.Workspace)/s/web/Dockerfile'
         buildContext: '$(Pipeline.Workspace)/s/web'
         tags: |
           $(majorVar).$(patch)
-          latest
 
     - task: Docker@2
       displayName: Build+Push api
       inputs:
         command: buildAndPush
         repository: '$(repoApi)'
-        Dockerfile: '$(Pipeline.Workspace)/s/api/dockerfile'
+        Dockerfile: '$(Pipeline.Workspace)/s/api/Dockerfile'
         buildContext: '$(Pipeline.Workspace)/s/api'
         tags: |
           $(majorVar).$(patch)
-          latest
 
 # ===== CD =====
 - stage: Deploy
