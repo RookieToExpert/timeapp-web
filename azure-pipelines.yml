@@ -1,21 +1,23 @@
 trigger:
-  branches: [ main ]
+  branches:
+    include:
+    - main
 pr:
-  branches: [ main ]
+  branches:
+    include:
+    - main
 
-# ===== 可按需修改的变量 =====
 variables:
-  dockerHubRepo: 'rayrayye/timeapp-web'     # 你的 Docker Hub 仓库
-  dockerfilePath: 'Dockerfile'              # web 仓库中 Dockerfile 路径（你的是小写）
-  buildContext: '.'                         # 构建上下文（web 仓库根）
-  k8sServiceConnection: 'k8s-sc'            # 你创建的 K8s Service Connection 名称
-  namespace: 'timeapp'                      # K8s 命名空间
-  deployment: 'web'                         # K8s Deployment 名
-  container: 'web'                          # Deployment 内的容器名
+  dockerHubRepo: 'rayrayye/timeapp-web'
+  dockerfilePath: 'Dockerfile'          # 你的 web 仓库确实是小写
+  buildContext: '.'
+  k8sServiceConnection: 'k8s-sc'
+  namespace: 'timeapp'
+  deployment: 'web'
+  container: 'web'
 
-  # 版本号（从 1.0 开始、自动递增 patch）
   major: '1'
-  counterKey: 'web-1'                       # web 独立计数器 key
+  counterKey: 'web-1'
   patch: $[ counter(variables['counterKey'], 0) ]
   version: '$(major).$(patch)'
 
@@ -24,12 +26,14 @@ stages:
   displayName: Build & Push Web Image
   jobs:
   - job: build
+    pool:
+      vmImage: 'ubuntu-latest'
     steps:
     - task: Docker@2
       displayName: Login Docker Hub
       inputs:
         command: login
-        containerRegistry: 'toDockerHub'   # 你之前建好的 Docker Hub service connection 名
+        containerRegistry: 'toDockerHub'    # 你的 Docker Hub service connection
 
     - task: Docker@2
       displayName: Build+Push web:$(version)
