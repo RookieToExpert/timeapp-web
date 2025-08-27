@@ -1,0 +1,143 @@
+# ========= RookieToExpert · timeapp（web + api）=========
+# 同时监听两个 GitHub 仓库，构建并部署到 k8s: timeapp
+# 版本策略：<major>.<counter> —— 运行前选择/输入 major（如 1），
+#          每次运行 counter 自动 +1，得到 1.1、1.2、1.3 …
+
+parameters:
+- name: major
+  displayName: "Major version (e.g., 1 -> 1.1, 1.2, ...)"
+  type: string
+  default: '1'
+
+trigger: none   # 由 resources.repositories 触发
+
+resources:
+  repositories:
+  - repository: webRepo
+    type: github
+    name: RookieToExpert/timeapp-web
+    endpoint: RookieToExpert
+    ref: refs/heads/main
+    trigger:
+      branches: { include: [ main ] }
+  - repository: apiRepo
+    type: github
+    name: RookieToExpert/timeapp-api
+    endpoint: RookieToExpert
+    ref: refs/heads/main
+    trigger:
+      branches: { include: [ main ] }
+
+variables:
+  # Service connections
+  dockerHubSC: 'toDockerHub'
+  k8sSC: 'k8s-sc'
+
+  # Docker Hub repos（不带 docker.io）
+  repoWeb: 'rayrayye/timeapp-web'
+  repoApi: 'rayrayye/timeapp-api-new'
+
+  # K8s
+  ns: 'timeapp'
+  deployWeb: 'web'
+  deployApi: 'web-api'
+  containerWeb: 'web'
+  containerApi: 'api'              # <- 你的 web-api 部署里的容器名
+
+  # 自动递增的补丁号；以 major 作为计数键，切到 2 时会从 1 重新开始
+  patch: $[ counter(parameters.major, 1) ]
+
+stages:
+# ===== CI：构建并推送 =====
+- stage: BuildPush
+  displayName: Build & Push images
+  jobs:
+  - job: Build
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+    - checkout: webRepo
+      path: s/web
+    - checkout: apiRepo
+      path: s/api
+
+    - script: |
+        echo "Using version: ${{ parameters.major }}.$(patch)"
+      displayName: Show version
+
+    - task: Docker@2
+      displayName: Login Docker Hub
+      inputs:
+        command: login
+        containerRegistry: '$(dockerHubSC)'
+
+    # web 镜像
+    - task: Docker@2
+      displayName: Build+Push web
+      inputs:
+        command: buildAndPush
+        repository: '$(repoWeb)'
+        # 注意：你的仓库里是小写 dockerfile；如果改成标准 "Dockerfile"，这里也改
+        Dockerfile: '$(Pipeline.Workspace)/s/web/dockerfile'
+        buildContext: '$(Pipeline.Workspace)/s/web'
+        tags: |
+          ${{ parameters.major }}.$(patch)
+
+    # api 镜像
+    - task: Docker@2
+      displayName: Build+Push api
+      inputs:
+        command: buildAndPush
+        repository: '$(repoApi)'
+        Dockerfile: '$(Pipeline.Workspace)/s/api/dockerfile'
+        buildContext: '$(Pipeline.Workspace)/s/api'
+        tags: |
+          ${{ parameters.major }}.$(patch)
+          latest   # 如不想要 latest，把这一行删掉
+
+# ===== CD：滚动更新到 k8s/timeapp =====
+- stage: Deploy
+  displayName: Deploy to timeapp
+  dependsOn: BuildPush
+  jobs:
+  - job: K8s
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+    - task: Kubernetes@1
+      displayName: Set image (web)
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: '$(k8sSC)'
+        namespace: '$(ns)'
+        command: 'set'
+        arguments: >
+          image deployment/$(deployWeb)
+          $(containerWeb)=docker.io/$(repoWeb):${{ parameters.major }}.$(patch)
+
+    - task: Kubernetes@1
+      displayName: Set image (web-api)
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: '$(k8sSC)'
+        namespace: '$(ns)'
+        command: 'set'
+        arguments: >
+          image deployment/$(deployApi)
+          $(containerApi)=docker.io/$(repoApi):${{ parameters.major }}.$(patch)
+
+    - task: Kubernetes@1
+      displayName: Wait rollout (web)
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: '$(k8sSC)'
+        namespace: '$(ns)'
+        command: 'rollout'
+        arguments: 'status deployment/$(deployWeb) --timeout=180s'
+
+    - task: Kubernetes@1
+      displayName: Wait rollout (web-api)
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: '$(k8sSC)'
+        namespace: '$(ns)'
+        command: 'rollout'
+        arguments: 'status deployment/$(deployApi) --timeout=180s'
