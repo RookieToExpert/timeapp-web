@@ -17,7 +17,7 @@ variables:
   version: '$(major).$(patch)'
 
   GITHUB_REPO: 'RookieToExpert/az305'
-  IMG_NAME: 'rayrayye/timeapp-web'       # 不带 docker.io 前缀，和 overlays/prod 里一致
+  IMG_NAME: 'rayrayye/timeapp-web'       # 与 overlays/prod 一致（不带 docker.io）
 
 stages:
 - stage: Build
@@ -97,9 +97,8 @@ stages:
         [[ -z "$FILE" ]] && FILE="${CANDIDATES[0]}"
         echo "[info] using kustomization: $FILE"
 
-        # 兼容 images.name / images.newName 两种写法，更新 web 的 tag
         yq -i '
-          (.images[] | select(
+          (.images[]? | select(
               (.name == env(IMG_NAME)) or
               (.newName == env(IMG_NAME))
           )).newTag = env(VERSION)
