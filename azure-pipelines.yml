@@ -2,23 +2,23 @@ trigger: { branches: { include: [ main ] } }
 pr:       { branches: { include: [ main ] } }
 
 variables:
-  # 镜像（web）
+  # 镜像仓库（web）
   webRepo: 'docker.io/rayrayye/timeapp-web'
   dockerfilePath: 'Dockerfile'
   buildContext: '.'
 
-  # 配置仓（GitHub）
-  githubOrgRepo: 'RookieToExpert/az305'     # 形如 org/repo
-  configPath: 'kubernetes&docker/timeapp-config/overlays/prod'
-  configBranchPrefix: 'bump-web'
+  # 配置仓
+  githubOrgRepo: 'RookieToExpert/az305'   # org/repo
+  configPath: 'kubernetes&docker/timeapp-config/overlays/prod'  # 注意含 &
 
-  # 版本号（独立于 api 的计数器）
+  # 版本号（web独立计数）
   major: '1'
   counterKey: 'web-1'
   patch: $[ counter(variables['counterKey'], 0) ]
   version: '$(major).$(patch)'
 
 stages:
+# ---------- Build & Push ----------
 - stage: Build
   displayName: Build & Push (web)
   jobs:
@@ -27,7 +27,7 @@ stages:
     steps:
     - task: Docker@2
       displayName: Login Docker Hub
-      inputs: { command: login, containerRegistry: 'toDockerHub' }
+      inputs: { command: login, containerRegistry: 'toDockerHub' }   # 你的 Docker Hub service connection
 
     - task: Docker@2
       displayName: Build+Push web:$(version)
@@ -39,53 +39,54 @@ stages:
         tags: |
           $(version)
 
+# ---------- Create PR to config repo ----------
 - stage: ConfigPR
-  displayName: 'Create PR to bump web tag (GitOps)'
+  displayName: Create PR (bump web tag)
   dependsOn: Build
   jobs:
   - job: pr
     pool: { vmImage: 'ubuntu-latest' }
     steps:
+    - checkout: none
+
+    # yq 只在CI里临时安装
     - script: |
-        set -eux
+        set -euo pipefail
         curl -L https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
         chmod +x /usr/local/bin/yq
-        sudo apt-get update && sudo apt-get install -y gh
-      displayName: Install yq & gh
+      displayName: Install yq
 
     - script: |
-        set -eux
-        export GH_TOKEN="$(GITHUB_TOKEN)"
+        set -euo pipefail
+
         git config --global user.name  "ado-bot"
         git config --global user.email "ado-bot@example.com"
+        git config --global --add safe.directory /home/vsts/work
 
-        # 1) 克隆配置仓
-        git clone "https://github.com/$(githubOrgRepo).git" configrepo
+        # 1) 用 PAT 克隆配置仓（避免交互）
+        GIT_URL="https://$(GITHUB_TOKEN)@github.com/$(githubOrgRepo).git"
+        git clone "$GIT_URL" configrepo
         cd configrepo
 
         # 2) 新建分支
-        BR="$(configBranchPrefix)-$(version)-$(Build.BuildId)"
-        git checkout -b "$BR"
+        BR="bump-web-$(version)-$(Build.BuildId)"
+        git switch -c "$BR"
 
-        # 3) 修改 Kustomize 的 images[].newTag（只改 web）
+        # 3) 修改 images[].newTag（仅 web）
         FILE="$(configPath)/kustomization.yaml"
-        export IMG_NAME="$(webRepo)"
-        export VERSION="$(version)"
+        IMG_NAME="$(webRepo)"
+        VERSION="$(version)"
         yq -i '(.images[] | select(.name == env(IMG_NAME))).newTag = env(VERSION)' "$FILE"
-
-        echo "After change:" && yq '.images' "$FILE"
 
         git add "$FILE"
         git commit -m "chore(web): bump to $(version)"
         git push -u origin "$BR"
 
-        # 4) 创建 PR（手动或自动合并均可）
-        gh pr create \
-          --repo "$(githubOrgRepo)" \
-          --base main --head "$BR" \
-          --title "Bump web to $(version)" \
-          --body "Update web image tag to $(version) for GitOps" \
-          --label "gitops"
-      displayName: Bump web tag & open PR
+        # 4) 用 GitHub REST API 创建 PR（无需安装 gh）
+        curl -sS -X POST "https://api.github.com/repos/$(githubOrgRepo)/pulls" \
+          -H "Authorization: token $(GITHUB_TOKEN)" \
+          -H "Accept: application/vnd.github+json" \
+          -d "{\"title\":\"Bump web to $(version)\",\"body\":\"Update web image tag to $(version) for GitOps\",\"head\":\"$BR\",\"base\":\"main\",\"maintainer_can_modify\":true}"
+      displayName: 'Bump web tag & open PR'
       env:
-        GITHUB_TOKEN: $(GITHUB_TOKEN)
+        GITHUB_TOKEN: $(GITHUB_TOKEN)   # <<< 关键：把 Secret 注入脚本
