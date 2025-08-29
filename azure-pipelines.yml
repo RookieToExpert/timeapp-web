@@ -44,7 +44,6 @@ stages:
         #   --platform=linux/amd64
         tags: |
           $(version)
-          # latest
 
 - stage: PR
   displayName: Create PR to bump web tag (GitOps)
@@ -66,7 +65,6 @@ stages:
 
     - bash: |
         set -euo pipefail
-
         git config --global user.name  "ado-bot"
         git config --global user.email "ado-bot@example.com"
 
@@ -81,13 +79,10 @@ stages:
         mapfile -t CANDIDATES < <(
           git ls-files | grep -E 'timeapp-config(/.*)?/overlays(/.*)?/kustomization\.yaml$' || true
         )
-
         if [ ${#CANDIDATES[@]} -eq 0 ]; then
           echo "[error] no kustomization.yaml found under timeapp-config/**/overlays/**"
-          echo "[hint] example: kubernetes-docker/timeapp-config/overlays/prod/kustomization.yaml"
           exit 1
         fi
-
         echo "[info] candidates:"; printf ' - %s\n' "${CANDIDATES[@]}"
 
         FILE=""
