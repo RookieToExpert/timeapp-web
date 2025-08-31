@@ -96,7 +96,7 @@ stages:
           (.images[]? | select(
               (.name == env(IMG_NAME)) or
               (.newName == env(IMG_NAME))
-          )).newTag = env(VERSION)
+          )).newTag = strenv(VERSION)
         ' "$FILE"
 
         git add "$FILE"
